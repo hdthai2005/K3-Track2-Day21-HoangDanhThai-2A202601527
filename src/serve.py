@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from google.cloud import storage
+from boto3 import client as boto3_client
 import joblib
 import os
 
@@ -13,23 +13,19 @@ MODEL_PATH = os.path.expanduser("~/models/model.pkl")
 
 def download_model():
     """
-    Tai file model.pkl tu GCS ve may khi server khoi dong.
+    Tai file model.pkl tu S3 ve may khi server khoi dong.
 
     Ham nay duoc goi mot lan khi module duoc import. Su dung
-    GOOGLE_APPLICATION_CREDENTIALS de xac thuc (duoc dat trong systemd service).
+    AWS credentials (duoc dat trong systemd service).
     """
-    # TODO 1: Tao storage.Client()
-    client = storage.Client()
+    # TODO 1: Tao boto3 s3 client
+    s3 = boto3_client('s3')
 
-    # TODO 2: Lay bucket va blob tuong ung
-    bucket = client.bucket(GCS_BUCKET)
-    blob   = bucket.blob(GCS_MODEL_KEY)
-
-    # TODO 3: Tai file model xuong may
-    blob.download_to_filename(MODEL_PATH)
+    # TODO 2 & 3: Tai file model xuong may
+    s3.download_file(GCS_BUCKET, GCS_MODEL_KEY, MODEL_PATH)
 
     # TODO 4: In thong bao thanh cong
-    print("Model da duoc tai xuong tu GCS.")
+    print("Model da duoc tai xuong tu AWS S3.")
 
 download_model()
 model = joblib.load(MODEL_PATH)
