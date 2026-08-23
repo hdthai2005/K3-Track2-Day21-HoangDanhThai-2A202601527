@@ -138,13 +138,60 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - name: SSH deploy to VM
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: SCP serve.py to VM
+        uses: appleboy/scp-action@v0.1.4
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
+          source: "src/serve.py"
+          target: "/home/${{ secrets.VM_USER }}"
+
+      - name: SSH deploy to VM
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          CLOUD_CREDENTIALS_JSON: ${{ secrets.CLOUD_CREDENTIALS }}
+          BUCKET: ${{ secrets.CLOUD_BUCKET }}
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          envs: CLOUD_CREDENTIALS_JSON,BUCKET
           script: |
+            sudo apt-get update
+            sudo apt-get install -y python3-venv jq
+            mkdir -p ~/models ~/src
+            python3 -m venv ~/.venv
+            ~/.venv/bin/pip install fastapi uvicorn scikit-learn joblib boto3
+
+            export AWS_ACCESS_KEY_ID=$(echo $CLOUD_CREDENTIALS_JSON | jq -r .aws_access_key_id)
+            export AWS_SECRET_ACCESS_KEY=$(echo $CLOUD_CREDENTIALS_JSON | jq -r .aws_secret_access_key)
+
+            sudo tee /etc/systemd/system/mlops-serve.service > /dev/null <<EOF
+            [Unit]
+            Description=MLOps Model Inference Server
+            After=network.target
+
+            [Service]
+            User=${USER}
+            WorkingDirectory=/home/${USER}
+            Environment="GCS_BUCKET=${BUCKET}"
+            Environment="AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}"
+            Environment="AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}"
+            Environment="AWS_DEFAULT_REGION=ap-southeast-1"
+            ExecStart=/home/${USER}/.venv/bin/python /home/${USER}/src/serve.py
+            Restart=always
+            RestartSec=5
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable mlops-serve
             sudo systemctl restart mlops-serve
             sleep 5
             curl -sf http://localhost:8000/health && echo "Health check passed." || exit 1
